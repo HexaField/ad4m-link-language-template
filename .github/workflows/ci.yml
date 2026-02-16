@@ -1,0 +1,129 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [22.x]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Cache pnpm dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
+
+      - name: Fix SSH git deps in lockfile
+        run: |
+          sed -i 's|git+ssh://git@github.com|https://github.com|g' pnpm-lock.yaml
+          sed -i 's|git+https://git@github.com:perspect3vism|https://github.com/perspect3vism|g' pnpm-lock.yaml
+          sed -i 's|repo: git@github.com:perspect3vism/appdata-path.git|repo: https://github.com/perspect3vism/appdata-path.git|g' pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Run unit tests
+        run: pnpm run test
+
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    strategy:
+      matrix:
+        node-version: [22.x]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+
+      - name: Cache pnpm dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
+
+      - name: Fix SSH git deps in lockfile
+        run: |
+          sed -i 's|git+ssh://git@github.com|https://github.com|g' pnpm-lock.yaml
+          sed -i 's|git+https://git@github.com:perspect3vism|https://github.com/perspect3vism|g' pnpm-lock.yaml
+          sed -i 's|repo: git@github.com:perspect3vism/appdata-path.git|repo: https://github.com/perspect3vism/appdata-path.git|g' pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      # Replace ad4m-test with fixed source from coasys/ad4m fix branch,
+      # then build and prepare system language bundles for Deno runtime
+      - name: Build ad4m-test from fix branch
+        run: node scripts/patch-ad4m-test.cjs
+
+      # Pre-download the AD4M executor binary
+      - name: Download AD4M executor binary
+        run: |
+          mkdir -p ~/.ad4m-test/binary
+          curl -sL -o ~/.ad4m-test/binary/ad4m \
+            'https://github.com/coasys/ad4m/releases/download/v0.10.1/ad4m-cli-executor-linux-0.10.1-x64'
+          chmod +x ~/.ad4m-test/binary/ad4m
+          echo "Binary downloaded: $(~/.ad4m-test/binary/ad4m --version 2>&1 || true)"
+
+      - name: Build language bundle
+        run: pnpm run build
+
+      - name: Run E2E tests
+        run: pnpm run test:e2e
+        timeout-minutes: 10
+
+      - name: Run multi-agent E2E tests
+        if: success()
+        continue-on-error: true
+        run: pnpm run test:e2e:multi
+        timeout-minutes: 10
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ad4m-test-logs
+          path: ad4m-test.log
+          if-no-files-found: ignore
