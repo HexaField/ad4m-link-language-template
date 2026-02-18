@@ -93,9 +93,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
 
-      # Download bootstrap seed from coasys/ad4m and copy to ad4m-test
-      - name: Patch ad4m-test with bootstrap seed
-        run: node scripts/patch-ad4m-test.cjs
+      # Build @coasys/ad4m-test from source (the npm package is broken).
+      # When a fixed version is published, replace this with a normal dependency.
+      - name: Build ad4m-test from source
+        run: bash scripts/setup-ad4m-test.sh
 
       # Pre-download the AD4M executor binary
       - name: Download AD4M executor binary
