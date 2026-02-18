@@ -101,8 +101,8 @@ const fixedSrcDir = cloneFixedSource();
 const seedTmp = '/tmp/bootstrapSeed.json';
 console.log(`\nDownloading bootstrap seed from ${BOOTSTRAP_SEED_URL}...`);
 execSync(`curl -sL -o "${seedTmp}" "${BOOTSTRAP_SEED_URL}"`, { stdio: 'inherit' });
-const seed = JSON.parse(fs.readFileSync(seedTmp, 'utf-8'));
-console.log(`  Bootstrap seed downloaded (${Object.keys(seed).length} keys)\n`);
+const seedData = JSON.parse(fs.readFileSync(seedTmp, 'utf-8'));
+console.log(`  Bootstrap seed downloaded (${Object.keys(seedData).length} keys)\n`);
 
 for (const dir of dirs) {
   console.log(`\nProcessing: ${dir}`);
@@ -114,9 +114,17 @@ for (const dir of dirs) {
   console.log(`  Compiling TypeScript...`);
   execSync(`cd "${dir}" && npx tsc --noImplicitAny false`, { stdio: 'inherit' });
   
-  // Step 3: Copy bootstrap seed (replaces language download + CJS→ESM conversion)
-  fs.copyFileSync(seedTmp, path.join(dir, 'bootstrapSeed.json'));
-  console.log(`  Copied bootstrapSeed.json`);
+  // Step 3: Copy bootstrap seed with storage paths configured
+  const publishedLangs = path.resolve(dir, 'build', 'publishedLanguages');
+  const publishedNeighbourhoods = path.resolve(dir, 'build', 'publishedNeighbourhood');
+  fs.mkdirSync(publishedLangs, { recursive: true });
+  fs.mkdirSync(publishedNeighbourhoods, { recursive: true });
+
+  const seed = { ...seedData };
+  seed.languageLanguageSettings = { storagePath: publishedLangs };
+  seed.neighbourhoodLanguageSettings = { storagePath: publishedNeighbourhoods };
+  fs.writeFileSync(path.join(dir, 'bootstrapSeed.json'), JSON.stringify(seed));
+  console.log(`  Copied bootstrapSeed.json with storage paths`);
 }
 
 console.log('\nDone!');
