@@ -1,162 +1,145 @@
 # AD4M Link Language Template
 
-A ready-to-use template for creating [AD4M](https://ad4m.dev) Languages with full unit + E2E test support and GitHub Actions CI.
+A starting point for building new **AD4M link languages** using the modern [ALDK](https://github.com/coasys/ad4m/tree/dev/ad4m-ldk) (`@coasys/ad4m-ldk`) pattern.
 
-## What is an AD4M Language?
+This template gives you a working link language skeleton with:
 
-AD4M (Agent-Centric Distributed Application Meta-ontology) uses "Languages" as its abstraction for any storage/communication backend. A Language defines how expressions (content) are created, stored, and retrieved, and how links (relationships) are synced between agents.
+- Local link store with indexed queries (by source, target, predicate)
+- Transport and storage adapter pattern (pure/impure separation)
+- Template variable support for per-neighbourhood configuration
+- esbuild bundling for the Deno executor runtime
+- Unit tests that run outside the executor (Node.js + tsx)
 
-This template provides the scaffolding so you can focus on your adapter logic — the Rollup config, Deno compatibility, CI pipeline, and test infrastructure are all handled.
+## Prerequisites
+
+- **[Deno](https://deno.land/)** (v1.32+) — used by the executor runtime and the build script
+- **[Node.js](https://nodejs.org/)** (v20+) + **npm/pnpm** — for dev dependencies and running tests
+- **`@coasys/ad4m-ldk`** — either:
+  - Cloned at a sibling path: `../ad4m/ad4m-ldk/js/` (the default)
+  - Or set `AD4M_LDK_ENTRY` env var to the compiled `lib/index.js`
 
 ## Quick Start
 
 ```bash
-# 1. Clone this template
-git clone https://github.com/YOUR_ORG/ad4m-link-language-template my-language
-cd my-language
+# Install dev dependencies
+pnpm install   # or npm install
 
-# 2. Update package.json with your language name
-# 3. Install dependencies
-pnpm install
+# Build the bundle
+deno run --allow-all esbuild.ts
 
-# 4. Run unit tests (in-memory adapters work out of the box)
-pnpm test
+# Run tests
+node --experimental-vm-modules --import tsx --test tests/*.test.ts
 
-# 5. Build the bundle
-pnpm run build
-
-# 6. Run E2E tests (requires Linux — see CI section)
-pnpm run test:e2e
+# Type-check
+npx tsc --noEmit
 ```
 
 ## Project Structure
 
 ```
+├── index.ts              # Main entry — uses defineLanguage() from @coasys/ad4m-ldk
+├── esbuild.ts            # Build script (Deno + esbuild)
+├── package.json          # Dependencies
+├── tsconfig.json         # TypeScript config
 ├── src/
-│   ├── index.ts          # Language factory — entry point
-│   ├── adapter.ts        # Expression adapter (create/get expressions)
-│   ├── links.ts          # Links adapter (add/remove/get links)
-│   └── types.ts          # Shared types
-├── test/
-│   ├── adapter.test.ts   # Unit tests for expressions
-│   ├── links.test.ts     # Unit tests for links
-│   └── ad4m-e2e.test.js  # E2E test with real AD4M executor
-├── scripts/
-│   └── patch-ad4m-test.cjs  # Compatibility patches for @coasys/ad4m-test
-├── rollup.config.js      # Builds Deno-compatible ESM bundle
-├── .github/workflows/
-│   └── ci.yml            # GitHub Actions: unit + E2E tests
-└── package.json
+│   ├── types.ts          # Shared types (PerspectiveDiff, LinkExpression, etc.)
+│   ├── store.ts          # Local link store using storage KV
+│   ├── transport.ts      # Transport interface + singleton
+│   ├── transport-deno.ts # Deno/executor transport (httpFetch wrapper)
+│   ├── storage-interface.ts  # Storage adapter interface
+│   ├── storage-deno.ts   # Deno storage adapter (storageGet/storagePut)
+│   └── sync.ts           # Sync logic (implement your remote sync here)
+├── tests/
+│   └── store.test.ts     # Unit tests for the link store
+├── build/                # Output directory (bundle.js)
+├── README.md
+└── LICENSE               # CAL-1.0
 ```
 
-## Building Your Language
+## Architecture
 
-### 1. Implement Your Adapters
+### Pure / Impure Separation
 
-The template ships with in-memory adapters that pass all tests. Replace them with your actual storage backend:
+Core logic is kept free of runtime-specific imports:
 
-- **`src/adapter.ts`** — `MyExpressionAdapter` and `MyPutAdapter`
-  - `createPublicExpression(data)` → store content, return address
-  - `get(address)` → retrieve content by address
+- **Pure modules** (`types.ts`, `store.ts`, `transport.ts`, `storage-interface.ts`, `sync.ts`) — no `ad4m:host` imports. They depend only on TypeScript types and injected adapters. These can be tested in plain Node.js.
+- **Impure modules** (`storage-deno.ts`, `transport-deno.ts`) — wrap `ad4m:host` functions via `@coasys/ad4m-ldk`. Only imported in `index.ts` during `init()`.
 
-- **`src/links.ts`** — `MyLinksAdapter`
-  - `addLink(link)` → persist a link
-  - `removeLink(link)` → remove a link
-  - `getLinks(query)` → query links
+This separation means your business logic is testable without the executor runtime.
 
-### 2. Add Your Dependencies
+### Transport Adapter
 
-Install your storage backend (e.g., Gun.js, Automerge, Nostr, IPFS):
+The transport layer abstracts HTTP calls. In the executor, `httpFetch` from `ad4m:host` is the only way to make outbound requests.
 
-```bash
-pnpm add gun  # or whatever you're using
+**Important:** `httpFetch` returns raw body text on 2xx and throws on non-2xx. The `DenoTransport` in `src/transport-deno.ts` handles this by parsing the error message format to extract status codes.
+
+In tests, inject a `MockTransport` that implements the `Transport` interface.
+
+### Storage Adapter
+
+The storage layer wraps the executor's KV store (`storageGet`, `storagePut`, `storageDelete`, `storageListKeys`). In tests, use a simple `Map`-based mock.
+
+### defineLanguage()
+
+The modern ALDK entry point. Instead of the old `create(context: LanguageContext)` pattern, you call `defineLanguage()` with a config object that declares your capabilities:
+
+```typescript
+const language = defineLanguage({
+    name: "my-language",
+    version: "0.1.0",
+    isPublic: true,
+    async init() { /* ... */ },
+    commit: { async commit(diff) { /* ... */ } },
+    sync: { async sync() { /* ... */ } },
+    query: { supportedKinds() { /* ... */ }, async run(req) { /* ... */ } },
+});
 ```
 
-### 3. Build
+The returned object has flat exports (`perspectiveCommit`, `perspectiveSyncSync`, etc.) that the executor binds to.
 
-```bash
-pnpm run build
-# Produces build/index.js — a single ESM bundle
+## Template Variables
+
+Template variables allow per-neighbourhood configuration at publish time. Mark them with the `//!@ad4m-template-variable` comment:
+
+```typescript
+//!@ad4m-template-variable
+const MY_CONFIG = "<to-be-filled>";
 ```
 
-## Deno Compatibility
+When the language is published via `language.publish`, the executor replaces `"<to-be-filled>"` with actual values from the `templateParams` map. The `possibleTemplateParams` export tells the executor which variables exist.
 
-The AD4M executor runs Language bundles in an embedded **Deno** runtime, not Node.js. This means:
+Add your own template variables for backend URLs, API keys, room IDs, or any per-neighbourhood configuration.
 
-- **ESM only** — no `require()`, no `module.exports`
-- **No `node_modules`** — everything must be bundled (Rollup `external: []`)
-- **`node:` prefix required** — `import fs from 'fs'` → `import fs from 'node:fs'`
-- **No CJS dependencies** — the Rollup config converts them automatically
+## Publishing
 
-The included `rollup.config.js` handles all of this with two custom plugins:
-- `node-prefix-builtins` — rewrites bare Node builtin imports to `node:` prefix
-- `ignore-package-json` — resolves `package.json` imports to empty objects
+To publish your language to an AD4M executor:
 
-### Inlining Large Assets (WASM, etc.)
+1. Build the bundle: `deno run --allow-all esbuild.ts`
+2. Use the executor's WebSocket API to call `language.publish`:
 
-If your language uses WASM or other binary assets, they must be inlined in the bundle since Deno loads languages in isolation with no filesystem access to `node_modules`. See the commented example in `rollup.config.js`.
-
-## Testing
-
-### Unit Tests
-
-```bash
-pnpm test  # vitest
+```json
+{
+    "languagePath": "./build/bundle.js",
+    "languageMeta": {
+        "name": "my-ad4m-link-language",
+        "description": "My custom link language",
+        "possibleTemplateParams": ["UNIQUE_SEED"],
+        "sourceCodeLink": "https://github.com/your-org/your-repo"
+    }
+}
 ```
 
-Unit tests use mocked `LanguageContext` and run anywhere (Node 22+).
+## Implementing Your Sync Logic
 
-### E2E Tests
+The `src/sync.ts` file contains a `performSync()` stub. Replace it with your actual remote sync implementation:
 
-```bash
-pnpm run test:e2e  # requires Linux with glibc 2.39+
-```
+1. Use `getTransport()` for HTTP calls to your backend
+2. Use `getStorage()` for persisting sync state (tokens, cursors)
+3. Use `store.applyDiff()` to persist incoming links
+4. Return the `PerspectiveDiff` of new changes
 
-E2E tests run your Language inside a real AD4M executor. They require:
-- **Linux** (no macOS binary available)
-- **glibc 2.39+** (Ubuntu 24.04+ or GitHub Actions `ubuntu-latest`)
-- **Node 22+**
-
-The CI workflow handles all of this automatically on GitHub Actions.
-
-### `@coasys/ad4m-test` Compatibility
-
-The published `@coasys/ad4m-test` package has [multiple issues](https://github.com/coasys/ad4m/issues/671) that prevent it from working out of the box. The included `scripts/patch-ad4m-test.cjs` handles all of them:
-
-- Compiles the TypeScript source (no `build/` directory shipped)
-- Fixes CLI flag names (camelCase → kebab-case)
-- Fixes GitHub API URL (`perspect3vism` → `coasys`)
-- Converts CJS language bundles to ESM for Deno
-- Patches out removed IPFS dependency
-- Creates `bootstrapSeed.json` with Language Language bundle
-
-These fixes are upstreamed in [PR #670](https://github.com/coasys/ad4m/pull/670). Once merged, the patch script can be simplified.
-
-## CI
-
-The included GitHub Actions workflow (`.github/workflows/ci.yml`) runs:
-
-1. **Unit Tests** — `pnpm test` on ubuntu-latest, Node 22
-2. **E2E Tests** — builds the bundle, patches ad4m-test, downloads the executor binary, runs the full integration test
-
-Push to `main` or open a PR to trigger it.
-
-## Creating a GitHub Template Repo
-
-To use this as a GitHub template:
-
-1. Push to a new repo
-2. Go to Settings → check "Template repository"
-3. Others can then click "Use this template" to create new languages
-
-## Related
-
-- [AD4M Documentation](https://docs.ad4m.dev)
-- [coasys/ad4m](https://github.com/coasys/ad4m) — AD4M source
-- [PR #670](https://github.com/coasys/ad4m/pull/670) — Test runner fixes
-- [Issue #671](https://github.com/coasys/ad4m/issues/671) — Compatibility issues tracker
-- [Issue #667](https://github.com/coasys/ad4m/issues/667) — Template repo request
+Similarly, extend `commit.commit()` in `index.ts` to push links to your backend.
 
 ## License
 
-MIT
+[Cryptographic Autonomy License v1.0 (CAL-1.0)](LICENSE)

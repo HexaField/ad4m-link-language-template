@@ -1,6 +1,5 @@
 node_modules/
 build/
-*.log
-.DS_Store
-build/
-node_modules/
+lib/
+deno.lock
+*.js.map

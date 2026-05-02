@@ -1,28 +1,43 @@
 /**
- * Shared type definitions for the language.
+ * Local type definitions mirroring the subset of @coasys/ad4m-ldk types
+ * needed by a link language.
  *
- * These supplement the core types from @coasys/ad4m.
+ * Kept local so that pure/core modules can be imported and tested
+ * without pulling in the ad4m:host runtime.
  */
 
-/** A link expression with author/timestamp metadata */
-export interface LinkExpression {
-  author: string;
-  timestamp: string;
-  data: {
+export type DID = string;
+export type Address = string;
+
+export interface ExpressionProof {
+    signature: string;
+    key: string;
+    valid?: boolean;
+    invalid?: boolean;
+}
+
+export interface Expression<T = unknown> {
+    author: DID;
+    timestamp: string;
+    data: T;
+    proof: ExpressionProof;
+}
+
+export interface Link {
     source: string;
     target: string;
     predicate?: string;
-  };
-  proof: {
-    key: string;
-    signature: string;
-    valid: boolean;
-    invalid: boolean;
-  };
 }
 
-/** Configuration passed via language settings */
-export interface LanguageConfig {
-  // TODO: Add your language-specific configuration here
-  [key: string]: unknown;
+export interface LinkExpression extends Expression<Link> {
+    status?: string;
+}
+
+export interface PerspectiveDiff {
+    additions: LinkExpression[];
+    removals: LinkExpression[];
+}
+
+export interface Perspective {
+    links: LinkExpression[];
 }
