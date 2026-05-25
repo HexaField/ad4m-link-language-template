@@ -10,7 +10,7 @@
  *   revision                         → last known sync token
  */
 
-import { getStorage } from "./storage-interface.js";
+import { getStorage } from "./adapters.js";
 import type { LinkExpression, PerspectiveDiff, Perspective } from "./types.js";
 
 let _hashFn: ((data: string) => string) | null = null;

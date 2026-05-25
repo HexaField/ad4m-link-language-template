@@ -22,10 +22,8 @@ import * as store from "./src/store.js";
 import { performSync } from "./src/sync.js";
 
 // Adapter imports (interfaces for singletons, Deno impls for init)
-import { initTransport } from "./src/transport.js";
-import { DenoTransport } from "./src/transport-deno.js";
-import { initStorage } from "./src/storage-interface.js";
-import { DenoStorageAdapter } from "./src/storage-deno.js";
+import { initTransport, initStorage } from "./src/adapters.js";
+import { DenoTransport, DenoStorageAdapter } from "./src/adapters-deno.js";
 
 // ---------------------------------------------------------------------------
 // Template Variables
